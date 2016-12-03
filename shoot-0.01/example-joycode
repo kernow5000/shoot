@@ -1,0 +1,356 @@
+/***************************************************************************
+                          init_quit.c  -  description
+                             -------------------
+    begin                : Sun Feb 23 2003
+    copyright            : (C) 2003 by Samuel E. Bray
+    email                : aristoidaneel@yahoo.com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+/* RCS: */
+/* $Id: init_quit.c,v 1.3 2003/03/04 06:29:39 root Exp root $ */
+/* $Log: init_quit.c,v $
+ * Revision 1.3  2003/03/04 06:29:39  root
+ * added the ablility to 'wrap' the lights when the screen is too small
+ *
+ * Revision 1.2  2003/03/04 03:33:58  root
+ * made to search for images in /usr/local/share/SDLJoytest
+ *
+ * Revision 1.1  2003/03/03 03:16:24  root
+ * Initial revision
+ * */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <getopt.h>
+#include <string.h>
+
+#include <SDL/SDL.h>
+#include <SDL/SDL_image.h>
+
+#include <GL/gl.h>
+#include <GL/glu.h>
+
+#include "joytest.h"
+#include "init_quit.h"
+ 
+
+static char prefix[256] = {'\0'};
+
+/*** Being Quit ***/
+/* use this to clean up and quit gracefully,
+ * depending on the particular situation */
+void Quit(enum e_returnCode returnCode)
+{
+  SDL_Quit();
+  if(returnCode != MOL) /* The meaning of life, the universe, and everything. */
+    exit((int)returnCode);
+  fprintf(stdout,"\nQuiting...\n");
+}
+/*** End Quit ***/
+
+/*** Begin Kaboom ***/
+/* use this function for SDL related
+ * error printing to stderr */
+void Kaboom(char *endString, enum e_returnCode returnCode)
+{
+  fprintf(stderr, "Error %s: %s\t returnCode = %d\n",endString, SDL_GetError(), (int)returnCode);
+  Quit(returnCode);
+}
+/*** End Kaboom ***/
+
+
+/*** Begin LoadTextures ***/
+int LoadTextures(void)
+{
+  int status = FALSE;
+
+  int i = 0;
+
+  strncat(prefix, PREFIX, 64);
+  SDL_Surface *textureImage[2];
+  textureImage[0] = SDL_LoadBMP(strncat(prefix,"/share/SDLJoytest-GL/font.bmp", 64));
+  for(i=256;i>sizeof(PREFIX)-1;i--) prefix[i] = '\0'; /* remove previous filename */
+  textureImage[1] = SDL_LoadBMP(strncat(prefix,"/share/SDLJoytest-GL/light.bmp", 64));
+
+  for(i=0;i<2;i++)
+    {
+      if(textureImage[i] == NULL)
+	status = FALSE;
+      else
+	status = TRUE;
+    }
+  if(status == TRUE)
+    {
+      glGenTextures(2, textures);
+      
+      for(i = 0; i<2; i++)
+	{
+	  glBindTexture(GL_TEXTURE_2D, textures[i]);
+	  glTexImage2D(GL_TEXTURE_2D,
+		       0,
+		       3,
+		       textureImage[i]->w,
+		       textureImage[i]->h,
+		       0,
+		       GL_BGR,
+		       GL_UNSIGNED_BYTE,
+		       textureImage[i]->pixels);
+	  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	  
+	  SDL_FreeSurface(textureImage[i]);
+	}
+    }
+  return status;
+}
+ 
+/*** End LoadTextures ***/ 
+  
+/*** Begin BuildFont() ***/
+GLvoid BuildFont(void)
+{
+  float cx; /* char x coord */
+  float cy; /* char y coord */
+  int i = 0;
+
+  base = glGenLists(256);
+
+  glBindTexture(GL_TEXTURE_2D, textures[0]);
+
+  for(i = 0; i < 256; i++)
+    {
+      /* Note:
+       * BMPs are stored with the top-leftmost pixel being the last
+       * byte and the bottom-rightmost pixel being the first byte
+       * So an image that is displayed as
+       * 1 0
+       * 0 0
+       * is represented data-wise like
+       * 0 0
+       * 0 1
+       *
+       * Because SDL_LoadBMP loads the raw data without
+       * translating to how it is thought of when viewed
+       * we need to start at the bottom-right corner of the data
+       * and work backwards to get everything right. so the below
+       * code has been modified to reflect this.
+       * Examine how this is done.
+       *
+       * As a side note BMPs are also stored as BGR instead of RGB
+       * and this is why the loaded texturesImages use GL_BGR.
+       */
+
+      cx = 1 - (float)(i%16) / 16.0f;
+      cy = 1 - (float)(i/16) / 16.0f;
+
+      /* start building the list */
+      glNewList(base + (255 - i), GL_COMPILE);
+      {
+	/* use a quad for each char */
+	glBegin(GL_QUADS);
+	{
+	  /* bottom left */
+	  glTexCoord2f(cx - 0.0625f, cy);
+	  glVertex2i(0, 16);
+	  
+	  /* bottom right */
+	  glTexCoord2f(cx, cy);
+	  glVertex2i(16, 16);
+
+	  /* top right */
+	  glTexCoord2f(cx, cy - 0.0625f);
+	  glVertex2i(16, 0);
+
+	  /* top left */
+	  glTexCoord2f(cx - 0.0625, cy - 0.0625);
+	  glVertex2i(0, 0);
+	}
+	glEnd();
+
+	/* move to the left of the char, for the next char */
+	glTranslated(15, 0, 0);
+      }
+      glEndList();
+    }
+}
+
+void SetGLWindow(int width, int height)
+{
+  if(height == 0)
+    height = 1; /* prevent div/zero */
+
+  glViewport(0,0,(GLint)width, (GLint)height);
+
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+
+  glOrtho(0.0f, width, height, 0.0f, -1.0f, 1.0f);
+
+  glMatrixMode(GL_MODELVIEW);
+  glLoadIdentity();
+}
+
+/*** Begin Init ***/
+void Init(void)
+{
+  int i = 0;
+
+  /* Video Init */
+  if(SDL_Init(SDL_INIT_VIDEO) == -1)
+    Kaboom("Unable to initialize video hardware", retVideo);
+
+  videoFlags = SDL_OPENGL | 
+    SDL_GL_DOUBLEBUFFER | 
+    SDL_HWPALETTE | 
+    SDL_RESIZABLE | 
+    SDL_HWSURFACE | 
+    SDL_HWACCEL;
+
+  if((screen = SDL_SetVideoMode(screenWidth, screenHeight, screenBPP, videoFlags)) == NULL)
+    Kaboom("Unable to set video mode", retVideo);
+
+  /* umm, i dunno */
+  if(!LoadTextures())
+    Kaboom("Unable to load texture Images", retFile);
+
+  BuildFont();
+
+  glShadeModel(GL_SMOOTH);
+
+  glClearColor(0.0f, 0.0f, 0.0f, 0.0f); /* black w/ an alpha of 5? */
+
+  glClearDepth(1.0f);
+
+  glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
+
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glEnable(GL_BLEND);
+
+  screenUnitX = JS_MAX / screenWidth;
+  screenUnitY = JS_MAX / screenHeight;
+  joyYCenter = screenHeight / 2;
+  joyXCenter = screenWidth / 2;
+
+  fprintf(stdout,"Screen resolution set to: %dx%dx%dbpp\n",screenWidth,screenHeight,screenBPP);
+
+  for(i=0;i<NUM_LIGHTS;i++)
+    {
+      /* we want the columns to increase if 
+       * we try to draw below the
+       * bottom of the screen
+       */
+      lights[i].x_offset = (64 * lightCol) + 10;
+      lights[i].y_offset = (64 * lightRow) + 10;
+      lightRow++;
+      if(lights[i].y_offset >= (screenHeight - (128)))
+	{
+	  lightCol++;
+	  lightRow = 0;
+	}
+
+      lights[i].toggle = FALSE;
+    }
+  aimer.x = joyXCenter;
+  aimer.y = joyYCenter;
+
+  SetGLWindow(screenWidth, screenHeight);
+}
+/*** End Init() ***/
+
+/* check the system and list all available joysticks
+ * then test each one and display the results
+ * then ask the to pick a joystick to test */
+SDL_Joystick *QueryJoyStick(void)
+{
+
+  int numJoyStick = 0;
+  int i = 0;
+  int die = 0;
+  SDL_Joystick *joystick;
+  int choice = 0;
+
+  /* attempt joystick init, explode on error */
+  if(SDL_InitSubSystem(SDL_INIT_JOYSTICK) != 0)
+    Kaboom("Unable to init Joystick subsystem!", retHardware);
+
+  /* This should never happen, but it doesn't hurt to be robust */
+  /* Check to make sure there is at least one joystick available */
+  if((numJoyStick = SDL_NumJoysticks()) == 0)
+    Kaboom("No joysticks available.", retHardware);
+  fprintf(stdout,"Found %i joystick(s) on this system.\n",numJoyStick);
+  die = numJoyStick;
+  /* loop through each joystick and print the info for each */
+  for(i = 0; i < numJoyStick; i++)
+    {
+      if((joystick = SDL_JoystickOpen(i)) == NULL)
+	{
+	  fprintf(stderr,"Unable to open joystick %i: %s\n",i,SDL_GetError());
+	  die--; /* see below */
+	}
+      else
+	{
+	  fprintf(stdout,"Joystick %i\n",i);
+	  fprintf(stdout,"\tName:.........%s\n",SDL_JoystickName(i));
+	  fprintf(stdout,"\tAxes:         %i\n",SDL_JoystickNumAxes(joystick));
+	  fprintf(stdout,"\tTrackBalls:...%i\n",SDL_JoystickNumBalls(joystick));
+	  fprintf(stdout,"\tButtons:      %i\n",SDL_JoystickNumButtons(joystick));
+	  SDL_JoystickClose(joystick);
+	}
+    }
+
+  /* This should never happen, again, trying to be robust, like *
+   * above, checked for each joystick as it is looped through *
+   * if none can be opened at this point, then explode, and something is
+   * seriously wrong, with the system */
+
+  /* I have read recently, that the above robustness is an error in coding; */
+  /* I'm not sure how, perhaps a little extra bloat, this is a testing program */
+  /* after all. */
+
+  /*  **Note: Kaboom() not used here, because Kaboom() checks with SDL_GetError(),
+   *  which would not be correct to do here. */
+  if(die == 0)
+    {
+      fprintf(stderr,"Unable to open any of the listed joysticks.\n");
+      Quit(retHardware);
+    }
+
+  /* check to see if there was a joystick declared on the command line */
+  if(!cmdOptJ[0])
+    {
+      /* ask for a joystick to work with */
+      fprintf(stdout,"Which Joystick do you want to use(0 - %i): ",(numJoyStick - 1));
+      scanf("%i",&choice);
+
+      /* attempt to open the requested joystick, explode on error. */
+      if((joystick = SDL_JoystickOpen(choice)) == NULL)
+	Kaboom("Unable to open selected joystick!", retHardware);
+    }
+  else {
+    if(cmdOptJ[1] < 0 || cmdOptJ[1] > numJoyStick)
+      {
+	fprintf(stderr,"Invalid joystick selection : %d\n",cmdOptJ[1]);
+	Quit(retHardware);
+      }
+    /* if the user entered something other than a number (atoi will return 0)
+     * or there are no joysticks on the system
+     * or there is something wrong with the joystick the user choose
+     * we can still bail out here (Yay!) */
+    if((joystick = SDL_JoystickOpen(cmdOptJ[1])) == NULL)
+      Kaboom("Unable to open selected joystick!", retHardware);
+  }
+
+  fprintf(stdout,"Joystick %i:%s selected.\n",choice, SDL_JoystickName(choice));
+
+  return joystick;
+}
+/*** End QueryJoyStick() ***/

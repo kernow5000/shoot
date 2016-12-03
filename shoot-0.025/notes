@@ -1,0 +1,2 @@
+milestone 1: check a pad is connected, if not quit (this works with a sixaxis, detects fine etc but does not give any input, just like jstest and other sdl apps)
+milestone 2: get all the buttons and directions from that pad, a 'pad test' as such
